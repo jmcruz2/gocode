@@ -161,7 +161,7 @@ func (t *TraceClientContext) Start(te TraceEngine, testParms CommandLineParams) 
 					}
 
 					io.Copy(ioutil.Discard, resp.Body)
-					
+
 					//io.Copy(os.Stdout, resp.Body)
 					resp.Body.Close()
 					if t.debugFlag {
