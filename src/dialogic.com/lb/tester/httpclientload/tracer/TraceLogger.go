@@ -7,20 +7,40 @@ import (
 	"time"
 )
 
+type LoggerDebugMsg struct {
+	ClientId                  int
+	MsgId                     int
+	ReusingConnection         bool
+	TotalMsgPerClient         int64
+	RoundTripResponseDuration time.Duration
+	ContentSizeBytes          int64
+}
+
+type LOG_TYPE int
+
+const LOG_TYPE_10SEC_MSG LOG_TYPE = 1
+const LOG_TYPE_DEBUG LOG_TYPE = 2
+const LOG_TYPE_MAX_MSG LOG_TYPE = 3
+
 type LoggerMsg struct {
-	numClients	 int
-	totalMsgPer10Sec uint64
-	Marker           string
-	Devider          bool
-	LineFeed         bool
-	Attributes map[string]time.Duration
-	pingPong         string
+	logType             LOG_TYPE
+	numClients          int
+	totalMsgPer10Sec    int64
+	Marker              string
+	Devider             bool
+	LineFeed            bool
+	Attributes          map[string]time.Duration
+	pingPong            string
+	avgContentSizeBytes int64
+	maxNumberOfMsgs     int64
+
+	debugStruct LoggerDebugMsg
 }
 
 type TraceLogger struct {
-	DontExit  bool
-	lbChannel chan LoggerMsg
-	fLog      *os.File
+	DontExit   bool
+	lbChannel  chan LoggerMsg
+	fLog       *os.File
 }
 
 func (tl *TraceLogger) Init(bcSize int) {
@@ -58,70 +78,42 @@ func (tl *TraceLogger) run(bcSize int) {
 		traceMsg := <-tl.lbChannel //get from channel queue
 		//fmt.Println("TLOGGER: got logTrace Msg from lbChannel")
 
-		if traceMsg.Devider {
-			log.Println("===============================================================================================================================")
-		}
+		if traceMsg.logType == LOG_TYPE_DEBUG {
+			header1 := fmt.Sprintf("%20s%20s%20s%20s%30s%25s", "ClientId", "MsgId", "ReusingConnection", "TotalMsgPerClient", "RoundTripResponseDuration", "ContentSizeBytes")
+			log.Println(header1)
+			line1 := fmt.Sprintf("%20v%20v%20v%20v%20v%25v\n", traceMsg.debugStruct.ClientId, traceMsg.debugStruct.MsgId, traceMsg.debugStruct.ReusingConnection, traceMsg.debugStruct.TotalMsgPerClient,
+				traceMsg.debugStruct.RoundTripResponseDuration, traceMsg.debugStruct.ContentSizeBytes)
+			log.Println(line1)
 
-		header1 := fmt.Sprintf("%16s%16s%16s%16s",  "Buffer Type", "Clients", "MSGS/10Secs", "tr/sec" )
-		log.Println(header1)
-		line1 := fmt.Sprintf("%16v%16v%16v%16v\n", traceMsg.pingPong, traceMsg.numClients, traceMsg.totalMsgPer10Sec, 0 )
-		log.Println(line1)
+		} else if traceMsg.logType == LOG_TYPE_10SEC_MSG {
+			if traceMsg.Devider {
+				log.Println("===============================================================================================================================")
+			}
 
-		header2 := fmt.Sprintf("%16s%16s%16s%16s%16s%16s",   "MaxResponse", "MaxServer ", "MaxLatency", "MinResponse", "MinServer", "MinLatency" )
-		log.Println(header2)
-		line2 := fmt.Sprintf("%16v%16v%16v%16v%16v%16v\n",  traceMsg.Attributes["MaxResponse"], traceMsg.Attributes["MaxServer"],
-			traceMsg.Attributes["MaxLatency"], traceMsg.Attributes["MinResponse"], traceMsg.Attributes["MinServer"], traceMsg.Attributes["MinLatency"])
-		log.Println(line2)
+			totalMsgPerSec := traceMsg.totalMsgPer10Sec / 10
+			header1 := fmt.Sprintf("%20s%20s%20s%20s%20s%25s", "Buffer Type", "Clients", "ReqPer/10Secs", "ReqPer/sec", "Avg Response Time", "Peak Response Time ")
+			log.Println(header1)
+			line1 := fmt.Sprintf("%20v%20v%20v%20v%20v%25v\n", traceMsg.pingPong, traceMsg.numClients, traceMsg.totalMsgPer10Sec, totalMsgPerSec,
+				traceMsg.Attributes["AvgRoundTripResponseDuration"], traceMsg.Attributes["PeakRoundTripResponseDuration"])
+			log.Println(line1)
 
-
-		header3 := fmt.Sprintf("%16s%16s%16s", "AvgResponse", "AvgServer", "AvgLatency" )
-		log.Println(header3)
-		line3 := fmt.Sprintf("%16v%16v%16v", traceMsg.Attributes["AvgLatency"], traceMsg.Attributes["AvgResponse"],traceMsg.Attributes["AvgServer"] )
-		log.Println(line3)
-
-
-		//msg := fmt.Sprintf("%16v%16v%16v%16v\n%16v%16v%16v%16v%16v%16v\n%16v%16v%16v", traceMsg.pingPong, traceMsg.numClients, traceMsg.totalMsgPer10Sec, 0, traceMsg.Attributes["MaxResponse"], traceMsg.Attributes["MaxServer"],
-		//	traceMsg.Attributes["MaxLatency"], traceMsg.Attributes["MinResponse"], traceMsg.Attributes["MinServer"], traceMsg.Attributes["MinLatency"],
-		//	traceMsg.Attributes["AvgLatency"], traceMsg.Attributes["AvgResponse"],traceMsg.Attributes["AvgServer"] )
-		//	log.Println(msg)
-		//for attrName, attrVal := range traceMsg.Attributes {
-
-		//	log.Println(attrName, attrVal)
-		//}
-
-		if traceMsg.LineFeed {
-			log.Println()
+			if traceMsg.LineFeed {
+				log.Println()
+			}
+		} else if traceMsg.logType == LOG_TYPE_MAX_MSG {
+			log.Println("================================Total Test Run Values  =================================================================================")
+			log.Println("Total Messages: ", traceMsg.maxNumberOfMsgs)
+			fmt.Println("Total Messages: ", traceMsg.maxNumberOfMsgs)
+			log.Println("End of Load Test")
 		}
 
 	}
-	//fmt.Println("TLOGGER Exit run")
 
 	tl.fLog.Close()
 
 }
 
 func (tl *TraceLogger) Log(traceMsg LoggerMsg) {
-	//fmt.Println("TLOGGER Log : putting tl.lbChannel <- traceMsg" , traceMsg )
 
 	tl.lbChannel <- traceMsg //write to channel queue
 }
-
-
-func (tl *TraceLogger) LogTestRunTotals(totalMsgs uint64) {
-
-	log.Println("================================Total Test Run Values  =================================================================================")
-	log.Println("Total Messages: ", totalMsgs)
-	fmt.Println("Total Messages: ", totalMsgs)
-	log.Println("End of Load Test")
-
-}
-
-func ( t1 *TraceLogger )Debug(dbgMsg string) {
-	log.Println("DEBUG: " , dbgMsg)
-}
-
-func ( t1 *TraceLogger )DebugUInt64(dbgMsg uint64) {
-	log.Println("DEBUG: " , dbgMsg)
-}
-
-

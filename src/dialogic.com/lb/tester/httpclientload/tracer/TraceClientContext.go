@@ -57,29 +57,28 @@ func (t *TraceClientContext) Start(te TraceEngine, testParms CommandLineParams) 
 
 			ConnectStart: func(network, addr string) {
 				//fmt.Println("Dial start")
-				t.cb.connectStartTime = time.Now()
-				t.cb.connectionStartDuration = t.cb.connectStartTime.Sub(t.cb.connectStartTime)
+				t.cb.ConnectStartTime = time.Now()
+				t.cb.ConnectionStartDuration = t.cb.ConnectStartTime.Sub(t.cb.ConnectStartTime)
 
 			},
 			ConnectDone: func(network, addr string, err error) {
 				//fmt.Println("ConnectDone")
-				t.cb.connectDoneTime = time.Now()
-				t.cb.connectDoneDuration = t.cb.connectDoneTime.Sub(t.cb.startingRequestTime)
+				t.cb.ConnectDoneTime = time.Now()
+				t.cb.ConnectDoneDuration = t.cb.ConnectDoneTime.Sub(t.cb.ConnectStartTime)
 			},
 			GotConn: t.cb.GotConn,
 
 			GotFirstResponseByte: func() {
-				t.cb.calcTotalServerProcessing()
-				t.cb.calcRcvLatency()
+				t.cb.FirstByteRecievedTime = time.Now()
+				t.cb.FirstByteRoundTripResponseDuration = t.cb.FirstByteRecievedTime.Sub(t.cb.WroteRequestTime )
 
 			},
 			WroteHeaders: func() {
 				//fmt.Println("Wrote headers")
 			},
 			WroteRequest: func(wr httptrace.WroteRequestInfo) {
-				t.cb.wroteRequestTime = time.Now()
-				t.cb.wroteRequestDuration = t.cb.wroteRequestTime.Sub(t.cb.gotConnectionTime)
-				t.cb.calcXmitLatency()
+				t.cb.WroteRequestTime = time.Now()
+				t.cb.WroteRequestDuration = t.cb.WroteRequestTime.Sub(t.cb.GotConnectionTime)
 			},
 		}
 
@@ -103,10 +102,11 @@ func (t *TraceClientContext) Start(te TraceEngine, testParms CommandLineParams) 
 
 		//for i := 0; i < *testParms.CallsPerSecond; i++ {
 		t.debugFlag = *testParms.DbgFlag
+		var totalMsgPerClient int64
+		totalMsgPerClient = 0
 		for {
 			if !t.tEngine.DoExit {
 				t.MsgId++
-				t.cb.startingRequestTime = time.Now()
 
 				if t.debugFlag {
 					fmt.Println("Start client.DO HTTP Request")
@@ -149,6 +149,11 @@ func (t *TraceClientContext) Start(te TraceEngine, testParms CommandLineParams) 
 					fmt.Println("MAJOR ERROR client.DO CLIENTID - error: ", t.ClientContextId, err)
 					//panic(err)
 				} else {
+					t.cb.RoundTripResponseTime = time.Now()
+					t.cb.RoundTripResponseDuration = t.cb.RoundTripResponseTime.Sub(t.cb.WroteRequestTime)
+
+					t.cb.ContentSizeBytes = resp.ContentLength
+
 					respClientMsgIds := resp.Header.Get("id")
 
 					if t.debugFlag {
@@ -168,19 +173,31 @@ func (t *TraceClientContext) Start(te TraceEngine, testParms CommandLineParams) 
 						fmt.Println("Completed client.DO HTTP Request CLIENTID: ", t.ClientContextId, t.MsgId)
 					}
 
-					traceDataEntry := TraceDataEntry{
-						newConnection:     t.cb.reusingConnection,
+					traceDataSample := TraceDataSample{
+						newConnection:     t.cb.ReusingConnection,
 						clientID:          t.ClientContextId,
 						msgID:             t.MsgId,
-						latencyDuration:   t.cb.getTotalLatency(),
-						serverDuration:    t.cb.getTotalServerProcessing(),
-						totalRespDuration: t.cb.calcTotalResponseTime(),
+						roundTripresponseDuration: t.cb.RoundTripResponseDuration,
+						contentSizeBytes:  t.cb.ContentSizeBytes,
 					}
 
-					if t.debugFlag {
-						fmt.Println("calling Engine.TraceEntry ", t.ClientContextId, t.MsgId )
-					}
-					t.tEngine.TraceEntry(traceDataEntry)
+					totalMsgPerClient++
+					//if t.debugFlag {
+					//debugMsg := LoggerMsg{
+					//	logType: LOG_TYPE_DEBUG,
+					//	debugStruct :LoggerDebugMsg{
+					//		TotalMsgPerClient: totalMsgPerClient,
+					//		ClientId: t.ClientContextId,
+					//		MsgId: t.MsgId,
+					//		ReusingConnection: t.cb.ReusingConnection,
+					//		RoundTripResponseDuration: t.cb.RoundTripResponseDuration,
+					//		ContentSizeBytes: t.cb.ContentSizeBytes,
+					//	},
+					//}
+					//t.traceLogger.Log(debugMsg)
+					//}
+					t.tEngine.TraceEntry(traceDataSample)
+					t.cb.reset()
 				}
 			} else {
 				fmt.Println("Exiting ClientContext CLIENTID: ", t.ClientContextId)

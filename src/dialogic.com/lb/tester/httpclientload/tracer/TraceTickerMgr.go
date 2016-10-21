@@ -1,8 +1,8 @@
 package tracer
 
 import (
-	"time"
 	"fmt"
+	"time"
 )
 
 type TraceTickerMgr struct {
@@ -14,7 +14,7 @@ type TraceTickerMgr struct {
 func (tm *TraceTickerMgr) Ctor(t int) {
 
 	tm.max10SecTickerInterval = t * 6 //say t =10 min total of ticker interval  there are 6 ten seconds periods in a minute
-	fmt.Println("TraceTicker number of repetions: ", t,  " Number of 10 sec periods: ", tm.max10SecTickerInterval)
+	fmt.Println("TraceTicker number of repetions: ", t, " Number of 10 sec periods: ", tm.max10SecTickerInterval)
 	tm.counter10SecTicks = 0
 
 }

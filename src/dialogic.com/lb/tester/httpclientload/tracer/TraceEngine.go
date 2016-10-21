@@ -21,27 +21,25 @@ const (
 	CHANNEL_TYPE_PONG CHANNEL_PINGPONG_TYPE = 200
 )
 
-type TraceDataEntry struct {
-	clientID          int
-	msgID             int
-	newConnection     bool
-	latencyDuration   time.Duration
-	serverDuration    time.Duration
-	totalRespDuration time.Duration
+type TraceDataSample struct {
+	clientID                  int
+	msgID                     int
+	newConnection             bool
+	roundTripresponseDuration time.Duration
+	contentSizeBytes          int64
 }
 
 //var channelActiveType2 CHANNEL_PINGPONG_TYPE
 //var channelPreviousActiveType2 CHANNEL_PINGPONG_TYPE
-
 type TraceEngine struct {
 	logger               TraceLogger
 	tickerMgr            TraceTickerMgr
 	waitOnTraceEntryLock *sync.Mutex
-	activeChannel        *chan TraceDataEntry
-	previousChan         *chan TraceDataEntry
+	activeChannel        *chan TraceDataSample
+	previousChan         *chan TraceDataSample
 
-	pingChannel chan TraceDataEntry
-	pongChannel chan TraceDataEntry
+	pingChannel chan TraceDataSample
+	pongChannel chan TraceDataSample
 
 	dontExit        bool
 	dontExitChannel chan bool
@@ -58,7 +56,7 @@ type TraceEngine struct {
 
 	numClients int
 
-	totalMessageProcessDuringTest uint64
+	totalMessageProcessDuringTest int64
 
 	work10Lock *sync.Mutex
 
@@ -74,8 +72,8 @@ func (t *TraceEngine) Ctor(channelBufSize int, reps int, numOfClients int, done 
 	t.testDone = done
 	t.debugFlag = dbg
 	t.numClients = numOfClients
-	t.pingChannel = make(chan TraceDataEntry, channelBufSize)
-	t.pongChannel = make(chan TraceDataEntry, channelBufSize)
+	t.pingChannel = make(chan TraceDataSample, channelBufSize)
+	t.pongChannel = make(chan TraceDataSample, channelBufSize)
 	t.activeChannel = &t.pingChannel
 	t.previousChan = &t.pingChannel
 	t.dontExitChannel = make(chan bool)
@@ -86,8 +84,8 @@ func (t *TraceEngine) Ctor(channelBufSize int, reps int, numOfClients int, done 
 	t.totalMessageProcessDuringTest = 0
 	t.DoExit = false
 
-	t.mping = pingMatrics{TraceMatrics{}}
-	t.mpong = pongMatrics{TraceMatrics{}}
+	t.mping = pingMatrics{Total10SecTraceMatrics{}}
+	t.mpong = pongMatrics{Total10SecTraceMatrics{}}
 	t.mping.Reset()
 	t.mpong.Reset()
 
@@ -97,24 +95,24 @@ func (t *TraceEngine) Ctor(channelBufSize int, reps int, numOfClients int, done 
 	t.logger.Init(1000) //1000 message buffer plenty
 	t.startedFlag = false
 
-	tNow := time.Now()
-	t.logger.Debug(fmt.Sprintf("**********************************************************************************"))
-	t.logger.Debug(fmt.Sprintf("New Load Test Started at %v", tNow))
-	t.logger.Debug("Column Definitions:")
-	t.logger.Debug("Clients=>Number of clients making calls - MSGS/10secs=>Number of Messages Sent to server per 10secs")
-	t.logger.Debug("tr/sec=>Max rate calls/sec")
-
-	t.logger.Debug("MaxResponse: Maximum Total Response in the 10sec period maxResponse=maxLatency+MaxServer")
-	t.logger.Debug("MaxServer:   Maximum time taken by the server to process request within the 10sec period")
-	t.logger.Debug("MaxLatency:  Maximum xmit and receive latency - maxLatency = MaxResponse - MaxServer (time on network)")
-
-	t.logger.Debug("MinResponse: Min Total Response in the 10sec period maxResponse=maxLatency+MaxServer")
-	t.logger.Debug("MinServer:   Min time taken by the server to process request within the 10sec period")
-	t.logger.Debug("MinLatency:  Min xmit and receive latency - minLatency = MinResponse - MinServer (time on network)")
-
-	t.logger.Debug("AvgResponse: Average Total Response in the 10sec period AvgResponse=AvgLatency+AvgServer")
-	t.logger.Debug("AvgServer:   Average time taken by the server to process request within the 10sec period")
-	t.logger.Debug("AvgLatency:  Average xmit and receive latency - AvgLatency = AvgResponse - AvgServer (time on network)")
+	//tNow := time.Now()
+	//t.logger.Debug(fmt.Sprintf("**********************************************************************************"))
+	//t.logger.Debug(fmt.Sprintf("New Load Test Started at %v", tNow))
+	//t.logger.Debug("Column Definitions:")
+	//t.logger.Debug("Clients=>Number of clients making calls - MSGS/10secs=>Number of Messages Sent to server per 10secs")
+	//t.logger.Debug("tr/sec=>Max rate calls/sec")
+	//
+	//t.logger.Debug("MaxResponse: Maximum Total Response in the 10sec period maxResponse=maxLatency+MaxServer")
+	//t.logger.Debug("MaxServer:   Maximum time taken by the server to process request within the 10sec period")
+	//t.logger.Debug("MaxLatency:  Maximum xmit and receive latency - maxLatency = MaxResponse - MaxServer (time on network)")
+	//
+	//t.logger.Debug("MinResponse: Min Total Response in the 10sec period maxResponse=maxLatency+MaxServer")
+	//t.logger.Debug("MinServer:   Min time taken by the server to process request within the 10sec period")
+	//t.logger.Debug("MinLatency:  Min xmit and receive latency - minLatency = MinResponse - MinServer (time on network)")
+	//
+	//t.logger.Debug("AvgResponse: Average Total Response in the 10sec period AvgResponse=AvgLatency+AvgServer")
+	//t.logger.Debug("AvgServer:   Average time taken by the server to process request within the 10sec period")
+	//t.logger.Debug("AvgLatency:  Average xmit and receive latency - AvgLatency = AvgResponse - AvgServer (time on network)")
 
 }
 
@@ -131,7 +129,7 @@ func (t *TraceEngine) getChannelActive() CHANNEL_PINGPONG_TYPE {
 	return t.channelActiveType
 }
 
-func (t *TraceEngine) TraceEntry(traceData TraceDataEntry) {
+func (t *TraceEngine) TraceEntry(traceData TraceDataSample) {
 
 	//fmt.Println("TraceEntry() calling waitOnTraceEntryLock LOCK")
 	//t.waitOnTraceEntryLock.Lock()
@@ -158,13 +156,12 @@ func (t *TraceEngine) TraceEntry(traceData TraceDataEntry) {
 
 }
 
-func (t *TraceEngine) calc10SecsLogEntry(td TraceDataEntry, chType CHANNEL_PINGPONG_TYPE) {
-
+func (t *TraceEngine) calc10SecsLogEntry(tdSample TraceDataSample, chType CHANNEL_PINGPONG_TYPE) {
 
 	if t.debugFlag {
 		fmt.Println("calc10SecsLogEntry")
 	}
-	var tm *TraceMatrics
+	var tm *Total10SecTraceMatrics
 
 	if chType == CHANNEL_TYPE_PING {
 		if t.debugFlag {
@@ -181,63 +178,41 @@ func (t *TraceEngine) calc10SecsLogEntry(td TraceDataEntry, chType CHANNEL_PINGP
 	tm.totalMsgsPer10Secs = tm.totalMsgsPer10Secs + 1
 	t.totalMessageProcessDuringTest = t.totalMessageProcessDuringTest + 1
 
-	if tm.avgLatencyCnt == 0 {
-		if t.debugFlag {
-			fmt.Println("ZERO DATA")
-		}
-		tm.avgLatencyCnt++
-		tm.avgLatencyTotal = td.latencyDuration
-		tm.avgLatencyDuration = td.latencyDuration
-		tm.maxLatencyDuration = td.latencyDuration
-		tm.minLatencyDuration = td.latencyDuration
-
-		tm.avgServerCnt++
-		tm.avgServerTotal = td.serverDuration
-		tm.avgServerDuration = td.serverDuration
-		tm.maxServerDuration = td.serverDuration
-		tm.minServerDuration = td.serverDuration
-
-		tm.avgTotalRespCnt++
-		tm.avgTotalRespTotal = td.totalRespDuration
-		tm.avgTotalRespDuration = td.totalRespDuration
-		tm.maxTotalRespDuration = td.totalRespDuration
-		tm.minTotalRespDuration = td.totalRespDuration
-
-	} else {
+	//if tm.avgLatencyCnt == 0 {
+	//	if t.debugFlag {
+	//		fmt.Println("ZERO DATA")
+	//	}
+	//	tm.avgLatencyCnt++
+	//	tm.avgLatencyTotal = tdSample.latencyDuration
+	//	tm.avgLatencyDuration = tdSample.latencyDuration
+	//	tm.maxLatencyDuration = tdSample.latencyDuration
+	//	tm.minLatencyDuration = tdSample.latencyDuration
+	//
+	//	tm.avgServerCnt++
+	//
+	//
+	//	tm.avgTotalRespCnt++
+	//
+	//
+	//} else {
+	{
 		if t.debugFlag {
 			fmt.Println("NONE ZERO DATA")
 		}
 
-		sDuration := (tm.avgLatencyTotal + td.latencyDuration) * time.Millisecond
-		tm.avgLatencyTotal = sDuration / ((time.Duration(tm.avgLatencyCnt)) * time.Millisecond)
+		tm.AvgContentSizeBytes = (tm.AvgContentSizeBytes + tdSample.contentSizeBytes) / tm.totalMsgsPer10Secs
 
-		tm.avgServerCnt++
-		sd := (tm.avgServerTotal + td.serverDuration) * time.Millisecond
-		tm.avgServerTotal = sd / ((time.Duration(tm.avgServerCnt)) * time.Millisecond)
+		tm.sumRoundTripResponseDuration = tm.sumRoundTripResponseDuration + tdSample.roundTripresponseDuration
 
-		tm.avgTotalRespCnt++
-		st := (tm.avgTotalRespTotal + td.totalRespDuration) * time.Millisecond
-		tm.avgTotalRespTotal = st / ((time.Duration(tm.avgTotalRespCnt)) * time.Millisecond)
+		var d64 int64
+		d64 = tm.sumRoundTripResponseDuration.Nanoseconds()
+		div64 := d64 / tm.totalMsgsPer10Secs
 
-		if td.latencyDuration > tm.maxLatencyDuration {
-			tm.maxLatencyDuration = td.latencyDuration
-		}
-		if td.latencyDuration < tm.minLatencyDuration {
-			tm.minLatencyDuration = td.latencyDuration
-		}
+		//tm.AvgRoundTripResponseDuration = tm.sumRoundTripResponseDuration / tm.totalMsgsPer10Secs
+		tm.AvgRoundTripResponseDuration = time.Duration(div64)
 
-		if td.serverDuration > tm.maxServerDuration {
-			tm.maxServerDuration = td.serverDuration
-		}
-		if td.serverDuration < tm.minServerDuration {
-			tm.minServerDuration = td.serverDuration
-		}
-
-		if td.totalRespDuration > tm.maxTotalRespDuration {
-			tm.maxTotalRespDuration = td.totalRespDuration
-		}
-		if td.totalRespDuration < tm.minTotalRespDuration {
-			tm.minTotalRespDuration = td.totalRespDuration
+		if tm.PeakRoundTripResponseDuration < tdSample.roundTripresponseDuration {
+			tm.PeakRoundTripResponseDuration = tdSample.roundTripresponseDuration
 		}
 	}
 
@@ -250,15 +225,15 @@ func (t *TraceEngine) work10SecTimeout() {
 	}
 
 	t.work10Lock.Lock()
-	var traceData TraceDataEntry
+	var traceDataSample TraceDataSample
 	var exitLoop = false
 
-	var tm *TraceMatrics
+	var tm *Total10SecTraceMatrics
 	var prevPingPong string
 
-	stime := time.Now()
+	//stime := time.Now()
 
-	//var bufChan chan TraceDataEntry
+	//var bufChan chan TraceDataSample
 	if t.channelPreviousActiveType == CHANNEL_TYPE_PING {
 		//if channelPreviousActiveType2 == CHANNEL_TYPE_PING {
 		prevPingPong = "PING"
@@ -282,14 +257,14 @@ func (t *TraceEngine) work10SecTimeout() {
 	for !exitLoop {
 
 		select {
-		case traceData = <-*t.previousChan:
+		case traceDataSample = <-*t.previousChan:
 			//case traceData = <-bufChan:
 			{
 				if t.debugFlag {
 					fmt.Println("work10SecTimeout t.calc10SecsLogEntry ChannelType: ", prevPingPong)
 				}
 				//t.calc10SecsLogEntry(traceData, channelPreviousActiveType2)
-				t.calc10SecsLogEntry(traceData, t.channelPreviousActiveType)
+				t.calc10SecsLogEntry(traceDataSample, t.channelPreviousActiveType)
 
 			}
 		default:
@@ -300,23 +275,17 @@ func (t *TraceEngine) work10SecTimeout() {
 				}
 
 				var tMsg LoggerMsg
-				//if tm.maxServerDuration != 0 {
 
 				valueMap := map[string]time.Duration{
-					"MaxResponse": tm.maxTotalRespDuration, //Maximum Total Response Time
-					"MaxServer":   tm.maxServerDuration,    //Maximum Total Server Processing Time
-					"MaxLatency":  tm.maxLatencyDuration,   //Maximum Total Latency
+					"AvgRoundTripResponseDuration":  tm.AvgRoundTripResponseDuration,
+					"PeakRoundTripResponseDuration": tm.PeakRoundTripResponseDuration,
+					"sumRoundTripResponseDuration":  tm.sumRoundTripResponseDuration}
 
-					"MinResponse": tm.minTotalRespDuration, //Minimum Total Response Time
-					"MinServer":   tm.minServerDuration,    //Minimum Total Server Processing Time
-					"MinLatency":  tm.minLatencyDuration,   // Minimum Total Latency
-
-					"AvgResponse": tm.avgTotalRespDuration, //Average Total Response Time
-					"AvgServer":   tm.avgServerDuration,    //Average Total Server Processing Time
-					"AvgLatency":  tm.avgLatencyDuration}   //Average Total Latenncy
-				tMsg = LoggerMsg{Marker: "NEW", Devider: true, LineFeed: false, numClients: t.numClients, pingPong: prevPingPong, totalMsgPer10Sec: tm.totalMsgsPer10Secs, Attributes: valueMap}
+				tMsg = LoggerMsg{logType: LOG_TYPE_10SEC_MSG,
+					Marker: "NEW", Devider: true, LineFeed: false, numClients: t.numClients, pingPong: prevPingPong,
+					totalMsgPer10Sec: tm.totalMsgsPer10Secs, avgContentSizeBytes: tm.AvgContentSizeBytes, Attributes: valueMap}
 				t.logger.Log(tMsg)
-				t.logger.DebugUInt64(t.totalMessageProcessDuringTest)
+
 				tm.Reset()
 
 				exitLoop = true
@@ -325,10 +294,15 @@ func (t *TraceEngine) work10SecTimeout() {
 		}
 
 	}
-	etime := time.Now()
-	extime := etime.Sub(stime)
+	//etime := time.Now()
+	//extime := etime.Sub(stime)
 	if t.debugFlag {
-		t.logger.Debug(extime.String())
+		var tMsg LoggerMsg
+		tMsg = LoggerMsg{
+			logType:         LOG_TYPE_MAX_MSG,
+			maxNumberOfMsgs: t.totalMessageProcessDuringTest,
+		}
+		t.logger.Log(tMsg)
 		fmt.Println("work10SecTimeout - calling work10Lock UNLOCK")
 		fmt.Println("work10SecTimeout ExitLoop")
 	}
@@ -343,24 +317,16 @@ func (t *TraceEngine) run() {
 		fmt.Println("Trace Engine Running")
 		t.startedFlag = true
 		t.tickerMgr.StartTicking()
-		var traceData TraceDataEntry
+		var traceData TraceDataSample
 
 		for t.dontExit {
-			//fmt.Println("run Select activeChannel")
-			//var bufChan chan TraceDataEntry
-			//if channelActiveType2 == CHANNEL_TYPE_PING {
-			//	bufChan = t.pingChannel
-			//
-			//} else {
-			//	bufChan = t.pongChannel
-			//}
+
 			select {
 			case traceData = <-*t.activeChannel:
 				{
 					if t.debugFlag {
 						fmt.Println("RUN - calling calc10SecsLogEntry", t.channelActiveType)
 					}
-					//t.calc10SecsLogEntry(traceData, channelActiveType2)
 					t.calc10SecsLogEntry(traceData, t.channelActiveType)
 
 				}
@@ -372,10 +338,7 @@ func (t *TraceEngine) run() {
 				{
 					//fmt.Println("run calling waitOnTraceEntryLock LOCK")
 
-
 					t.waitOnTraceEntryLock.Lock()
-
-					//var previousChan *chan TraceDataEntry
 
 					//fmt.Println("RUN - TIMEOUT RECEIVED")
 
@@ -391,8 +354,6 @@ func (t *TraceEngine) run() {
 							t.setChannelActive(CHANNEL_TYPE_PONG)
 							*t.activeChannel = t.pongChannel
 							*t.previousChan = t.pingChannel
-							//channelActiveType2 = CHANNEL_TYPE_PONG
-							//channelPreviousActiveType2 = CHANNEL_TYPE_PING
 							t.channelPreviousActiveType = CHANNEL_TYPE_PING
 						} else {
 							if t.debugFlag {
@@ -402,8 +363,7 @@ func (t *TraceEngine) run() {
 							*t.activeChannel = t.pingChannel
 							*t.previousChan = t.pongChannel
 							t.channelPreviousActiveType = CHANNEL_TYPE_PONG
-							//channelActiveType2 = CHANNEL_TYPE_PING
-							//channelPreviousActiveType2 = CHANNEL_TYPE_PONG
+
 						}
 						//fmt.Println("run calling waitOnTraceEntryLock UNLOCK")
 						t.waitOnTraceEntryLock.Unlock()
@@ -411,7 +371,7 @@ func (t *TraceEngine) run() {
 						t.work10SecTimeout()
 
 					} else {
-						t.logger.LogTestRunTotals(t.totalMessageProcessDuringTest)
+						//t.logger.LogTestRunTotals(t.totalMessageProcessDuringTest)
 						t.DoExit = true
 						t.waitOnTraceEntryLock.Unlock()
 
