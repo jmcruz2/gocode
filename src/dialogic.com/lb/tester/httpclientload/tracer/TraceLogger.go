@@ -21,6 +21,7 @@ type LOG_TYPE int
 const LOG_TYPE_10SEC_MSG LOG_TYPE = 1
 const LOG_TYPE_DEBUG LOG_TYPE = 2
 const LOG_TYPE_MAX_MSG LOG_TYPE = 3
+const LOG_TYPE_STRING LOG_TYPE = 4
 
 type LoggerMsg struct {
 	logType             LOG_TYPE
@@ -33,6 +34,8 @@ type LoggerMsg struct {
 	pingPong            string
 	avgContentSizeBytes int64
 	maxNumberOfMsgs     int64
+
+	stringMsg	    string
 
 	debugStruct LoggerDebugMsg
 }
@@ -104,7 +107,9 @@ func (tl *TraceLogger) run(bcSize int) {
 			log.Println("================================Total Test Run Values  =================================================================================")
 			log.Println("Total Messages: ", traceMsg.maxNumberOfMsgs)
 			fmt.Println("Total Messages: ", traceMsg.maxNumberOfMsgs)
-			log.Println("End of Load Test")
+			//log.Println("End of Load Test")
+		}else if traceMsg.logType == LOG_TYPE_STRING{
+			log.Println(traceMsg.stringMsg)
 		}
 
 	}

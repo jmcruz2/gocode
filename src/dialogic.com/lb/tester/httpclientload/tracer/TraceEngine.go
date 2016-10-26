@@ -63,10 +63,25 @@ type TraceEngine struct {
 	DoExit bool
 
 	debugFlag bool
+
+	Max10secRateCompleted bool
+
+	Max10secRateCompletedPtr *bool
+
+
+	Max10SecRestartMutex 	  sync.Mutex
+	Max10SecRestartMutexPtr   *sync.Mutex
+	Max10SecRestartCondPtr   *sync.Cond
+
+
+
+	rate int64
 }
 
-func (t *TraceEngine) Ctor(channelBufSize int, reps int, numOfClients int, done chan bool, dbg bool) {
+func (t *TraceEngine) Ctor(channelBufSize int, reps int, numOfClients int, done chan bool, dbg bool, r int) {
 	//fmt.Println("TraceEngine - CTOR")
+	t.rate = int64(r*10)
+	fmt.Println("Rate Per Ten Seconds: ", t.rate)
 	t.waitOnTraceEntryLock = &sync.Mutex{}
 	t.work10Lock = &sync.Mutex{}
 	t.testDone = done
@@ -94,6 +109,13 @@ func (t *TraceEngine) Ctor(channelBufSize int, reps int, numOfClients int, done 
 	t.logger = TraceLogger{}
 	t.logger.Init(1000) //1000 message buffer plenty
 	t.startedFlag = false
+
+	t.Max10secRateCompleted =false
+	t.Max10secRateCompletedPtr = &t.Max10secRateCompleted
+
+	t.Max10SecRestartMutex = sync.Mutex{}
+	t.Max10SecRestartMutexPtr = &t.Max10SecRestartMutex
+	t.Max10SecRestartCondPtr = sync.NewCond(t.Max10SecRestartMutexPtr)
 
 	//tNow := time.Now()
 	//t.logger.Debug(fmt.Sprintf("**********************************************************************************"))
@@ -176,6 +198,20 @@ func (t *TraceEngine) calc10SecsLogEntry(tdSample TraceDataSample, chType CHANNE
 	}
 
 	tm.totalMsgsPer10Secs = tm.totalMsgsPer10Secs + 1
+
+	//fmt.Println("tm.totalMsgsPer10Secs: ", tm.totalMsgsPer10Secs)
+	if t.rate < tm.totalMsgsPer10Secs {
+		t.Max10secRateCompleted = true
+		*t.Max10secRateCompletedPtr = true;
+		//fmt.Println("tm.totalMsgsPer10Secs: ", tm.totalMsgsPer10Secs , " t.Max10secRateCompleted: ", t.Max10secRateCompleted)
+
+
+		//if t.debugFlag {
+		//fmt.Println("calc10SecsLogEntry - Got to rate ts/sec ... holding down the clients from sending until next 10sec period")
+		//}
+
+	}
+
 	t.totalMessageProcessDuringTest = t.totalMessageProcessDuringTest + 1
 
 	//if tm.avgLatencyCnt == 0 {
@@ -273,6 +309,7 @@ func (t *TraceEngine) work10SecTimeout() {
 				if t.debugFlag {
 					fmt.Println("work10SecTimeout - Default - NO MORE DATA IN BUFFER")
 				}
+				fmt.Println("tm.totalMsgsPer10Secs: ", tm.totalMsgsPer10Secs)
 
 				var tMsg LoggerMsg
 
@@ -286,26 +323,25 @@ func (t *TraceEngine) work10SecTimeout() {
 					totalMsgPer10Sec: tm.totalMsgsPer10Secs, avgContentSizeBytes: tm.AvgContentSizeBytes, Attributes: valueMap}
 				t.logger.Log(tMsg)
 
-				tm.Reset()
-
-				exitLoop = true
-
+				t.Max10secRateCompleted = false
+				*t.Max10secRateCompletedPtr = false
+				//if  t.debugFlag {
+				fmt.Println("work10SecTimeout - Broacasting to all TraceClient to restart")
+				//}
+				t.Max10SecRestartMutex.Lock()
+				t.Max10SecRestartCondPtr.Broadcast()
+				t.Max10SecRestartMutex.Unlock()
 			}
-		}
 
-	}
-	//etime := time.Now()
-	//extime := etime.Sub(stime)
-	if t.debugFlag {
-		var tMsg LoggerMsg
-		tMsg = LoggerMsg{
-			logType:         LOG_TYPE_MAX_MSG,
-			maxNumberOfMsgs: t.totalMessageProcessDuringTest,
+			tm.Reset()
+
+			exitLoop = true
+
 		}
-		t.logger.Log(tMsg)
-		fmt.Println("work10SecTimeout - calling work10Lock UNLOCK")
-		fmt.Println("work10SecTimeout ExitLoop")
 	}
+
+	maxCntMsg := LoggerMsg{logType: LOG_TYPE_MAX_MSG, maxNumberOfMsgs: t.totalMessageProcessDuringTest}
+	t.logger.Log(maxCntMsg)
 
 	t.work10Lock.Unlock()
 
@@ -374,7 +410,8 @@ func (t *TraceEngine) run() {
 						//t.logger.LogTestRunTotals(t.totalMessageProcessDuringTest)
 						t.DoExit = true
 						t.waitOnTraceEntryLock.Unlock()
-
+						msg := LoggerMsg { logType: LOG_TYPE_STRING, stringMsg: "*** End of Load Test ***" }
+						t.logger.Log(msg)
 						fmt.Println("Trace ready to exit out... ")
 						time.Sleep(2 * time.Second)
 						t.testDone <- true
@@ -385,5 +422,6 @@ func (t *TraceEngine) run() {
 			}
 
 		}
+		
 	}()
 }

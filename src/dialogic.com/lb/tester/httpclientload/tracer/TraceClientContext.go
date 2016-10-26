@@ -10,8 +10,9 @@ import (
 
 	"strconv"
 
-	"github.com/tcnksm/go-httpstat"
 	"strings"
+
+	"github.com/tcnksm/go-httpstat"
 )
 
 type TraceClientContext struct {
@@ -70,7 +71,7 @@ func (t *TraceClientContext) Start(te TraceEngine, testParms CommandLineParams) 
 
 			GotFirstResponseByte: func() {
 				t.cb.FirstByteRecievedTime = time.Now()
-				t.cb.FirstByteRoundTripResponseDuration = t.cb.FirstByteRecievedTime.Sub(t.cb.WroteRequestTime )
+				t.cb.FirstByteRoundTripResponseDuration = t.cb.FirstByteRecievedTime.Sub(t.cb.WroteRequestTime)
 
 			},
 			WroteHeaders: func() {
@@ -104,100 +105,138 @@ func (t *TraceClientContext) Start(te TraceEngine, testParms CommandLineParams) 
 		t.debugFlag = *testParms.DbgFlag
 		var totalMsgPerClient int64
 		totalMsgPerClient = 0
+
 		for {
+			//check if on accomplished10secTrPerSec
+
 			if !t.tEngine.DoExit {
-				t.MsgId++
-
-				if t.debugFlag {
-					fmt.Println("Start client.DO HTTP Request")
-				}
-
-				//create request here slows down the number of messages sent by a large amount
-				//req, err := http.NewRequest("GET", *testParms.LbUri, nil)
-				//
-				//if err != nil {
-				//	fmt.Println("PANIC CLIENTID: ", t.ClientContextId)
-				//	panic(err)
+				//if !completed {
+				//if *t.tEngine.Max10secRateCompletedPtr {
+				//	fmt.Println("t.tEngine.Max10secRateCompleted : ", t.tEngine.Max10secRateCompleted)
+				//	fmt.Println("t.tEngine.Max10secRateCompletedPtr : ", *t.tEngine.Max10secRateCompletedPtr)
 				//}
-				//
-				//var statResult httpstat.Result
-				//ctx := httpstat.WithHTTPStat(req.Context(), &statResult)
-				//req = req.WithContext(ctx)
-				//req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
-				//
 
-				var reqClientId  string
-				var reqMsgId 	 string
-				var reqClientMsgIds string
-
-				if t.MsgId == 1 {
-					reqClientId = strconv.Itoa(t.ClientContextId)
-					reqMsgId = strconv.Itoa(t.MsgId)
-					reqClientMsgIds = fmt.Sprintf("id=%s  no=%s", reqClientId, reqMsgId)
-					req.Header.Add("id", reqClientMsgIds)
-				} else {
-					req.Header.Del("id")
-					reqClientId := strconv.Itoa(t.ClientContextId)
-					reqMsgId := strconv.Itoa(t.MsgId)
-					reqClientMsgIds := fmt.Sprintf("id=%s  no=%s", reqClientId, reqMsgId)
-					req.Header.Add("id", reqClientMsgIds)
-				}
-
-				resp, err := client.Do(req)
-
-				if err != nil {
-					fmt.Println("MAJOR ERROR client.DO CLIENTID - error: ", t.ClientContextId, err)
-					//panic(err)
-				} else {
-					t.cb.RoundTripResponseTime = time.Now()
-					t.cb.RoundTripResponseDuration = t.cb.RoundTripResponseTime.Sub(t.cb.WroteRequestTime)
-
-					t.cb.ContentSizeBytes = resp.ContentLength
-
-					respClientMsgIds := resp.Header.Get("id")
+				if !(*t.tEngine.Max10secRateCompletedPtr) {
+					t.MsgId++
 
 					if t.debugFlag {
-						fmt.Println("Got back: ", respClientMsgIds)
+						fmt.Println("Start client.DO HTTP Request")
 					}
 
-					respHeaderMsgIds := resp.Header.Get("id")
-					if strings.Compare(respClientMsgIds, respHeaderMsgIds) != 0 {
-						fmt.Println("Expected ClientId MsgId ", reqClientMsgIds, " Instead got back: ", respHeaderMsgIds)
+					//create request here slows down the number of messages sent by a large amount
+					//req, err := http.NewRequest("GET", *testParms.LbUri, nil)
+					//
+					//if err != nil {
+					//	fmt.Println("PANIC CLIENTID: ", t.ClientContextId)
+					//	panic(err)
+					//}
+					//
+					//var statResult httpstat.Result
+					//ctx := httpstat.WithHTTPStat(req.Context(), &statResult)
+					//req = req.WithContext(ctx)
+					//req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
+					//
+
+					var reqClientId string
+					var reqMsgId string
+					var reqClientMsgIds string
+
+					if t.MsgId == 1 {
+						reqClientId = strconv.Itoa(t.ClientContextId)
+						reqMsgId = strconv.Itoa(t.MsgId)
+						reqClientMsgIds = fmt.Sprintf("id=%s  no=%s", reqClientId, reqMsgId)
+						req.Header.Add("id", reqClientMsgIds)
+					} else {
+						req.Header.Del("id")
+						reqClientId := strconv.Itoa(t.ClientContextId)
+						reqMsgId := strconv.Itoa(t.MsgId)
+						reqClientMsgIds := fmt.Sprintf("id=%s  no=%s", reqClientId, reqMsgId)
+						req.Header.Add("id", reqClientMsgIds)
 					}
 
-					io.Copy(ioutil.Discard, resp.Body)
+					resp, err := client.Do(req)
 
-					//io.Copy(os.Stdout, resp.Body)
-					resp.Body.Close()
-					if t.debugFlag {
-						fmt.Println("Completed client.DO HTTP Request CLIENTID: ", t.ClientContextId, t.MsgId)
+					if err != nil {
+						fmt.Println("MAJOR ERROR client.DO CLIENTID - error: ", t.ClientContextId, err)
+						//panic(err)
+					} else {
+						t.cb.RoundTripResponseTime = time.Now()
+						t.cb.RoundTripResponseDuration = t.cb.RoundTripResponseTime.Sub(t.cb.WroteRequestTime)
+
+						t.cb.ContentSizeBytes = resp.ContentLength
+
+						respClientMsgIds := resp.Header.Get("id")
+
+						if t.debugFlag {
+							fmt.Println("Got back: ", respClientMsgIds)
+						}
+
+						respHeaderMsgIds := resp.Header.Get("id")
+						if strings.Compare(respClientMsgIds, respHeaderMsgIds) != 0 {
+							fmt.Println("Expected ClientId MsgId ", reqClientMsgIds, " Instead got back: ", respHeaderMsgIds)
+						}
+
+						io.Copy(ioutil.Discard, resp.Body)
+
+						//io.Copy(os.Stdout, resp.Body)
+						resp.Body.Close()
+						if t.debugFlag {
+							fmt.Println("Completed client.DO HTTP Request CLIENTID: ", t.ClientContextId, t.MsgId)
+						}
+
+						traceDataSample := TraceDataSample{
+							newConnection: t.cb.ReusingConnection,
+							clientID:      t.ClientContextId,
+							msgID:         t.MsgId,
+							roundTripresponseDuration: t.cb.RoundTripResponseDuration,
+							contentSizeBytes:          t.cb.ContentSizeBytes,
+						}
+
+						totalMsgPerClient++
+						//if t.debugFlag {
+						//debugMsg := LoggerMsg{
+						//	logType: LOG_TYPE_DEBUG,
+						//	debugStruct :LoggerDebugMsg{
+						//		TotalMsgPerClient: totalMsgPerClient,
+						//		ClientId: t.ClientContextId,
+						//		MsgId: t.MsgId,
+						//		ReusingConnection: t.cb.ReusingConnection,
+						//		RoundTripResponseDuration: t.cb.RoundTripResponseDuration,
+						//		ContentSizeBytes: t.cb.ContentSizeBytes,
+						//	},
+						//}
+						//t.traceLogger.Log(debugMsg)
+						//}
+						t.tEngine.TraceEntry(traceDataSample)
+						t.cb.reset()
 					}
-
-					traceDataSample := TraceDataSample{
-						newConnection:     t.cb.ReusingConnection,
-						clientID:          t.ClientContextId,
-						msgID:             t.MsgId,
-						roundTripresponseDuration: t.cb.RoundTripResponseDuration,
-						contentSizeBytes:  t.cb.ContentSizeBytes,
-					}
-
-					totalMsgPerClient++
+				} else {
 					//if t.debugFlag {
-					//debugMsg := LoggerMsg{
-					//	logType: LOG_TYPE_DEBUG,
-					//	debugStruct :LoggerDebugMsg{
-					//		TotalMsgPerClient: totalMsgPerClient,
-					//		ClientId: t.ClientContextId,
-					//		MsgId: t.MsgId,
-					//		ReusingConnection: t.cb.ReusingConnection,
-					//		RoundTripResponseDuration: t.cb.RoundTripResponseDuration,
-					//		ContentSizeBytes: t.cb.ContentSizeBytes,
-					//	},
+					//fmt.Println("Achive TR/SEC Waiting to be restarted clientId: ", t.ClientContextId)
 					//}
-					//t.traceLogger.Log(debugMsg)
+					//t.tEngine.Max10SecRestartMutex.Lock()
+					t.tEngine.Max10SecRestartCondPtr.L.Lock()
+					//fmt.Println("DID LOCK")
+					//fmt.Println("CALLING WAIT")
+
+					//if t.tEngine.Max10SecRestartCondPtr == nil {
+					//	fmt.Println("t.tEngine.Max10SecRestartCondPtr == null")
+					//
+					//} else {
+					//	fmt.Println("t.tEngine.Max10SecRestartCondPtr NOT NULL")
+					//	fmt.Println("t.tEngine.Max10SecRestartCondPtr : " ,*t.tEngine.Max10SecRestartCondPtr)
+					//
 					//}
-					t.tEngine.TraceEntry(traceDataSample)
-					t.cb.reset()
+					for (*t.tEngine.Max10secRateCompletedPtr) == true {
+						t.tEngine.Max10SecRestartCondPtr.Wait()
+						//fmt.Println("COMPLETED WAIT")
+					}
+
+					t.tEngine.Max10SecRestartCondPtr.L.Unlock()
+					//fmt.Println("Achive TR/SEC Starting again clientId: ", t.ClientContextId)
+					t.tEngine.Max10secRateCompleted = false
+					*t.tEngine.Max10secRateCompletedPtr = false
+
 				}
 			} else {
 				fmt.Println("Exiting ClientContext CLIENTID: ", t.ClientContextId)

@@ -40,7 +40,7 @@ func main() {
 
 	testDone = make(chan bool, 0)
 	traceEngine = tracer.TraceEngine{}
-	traceEngine.Ctor(100000, *CmdLineParams.RepetionInMin, *CmdLineParams.NumOfClients, testDone, *CmdLineParams.DbgFlag)
+	traceEngine.Ctor(100000, *CmdLineParams.RepetionInMin, *CmdLineParams.NumOfClients, testDone, *CmdLineParams.DbgFlag, *CmdLineParams.CallsPerSecond)
 
 	traceEngine.Start()
 
